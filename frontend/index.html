@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SaludChain</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <span class="logo">+</span>
+      <div>
+        <h1>SaludChain</h1>
+        <p>Donaciones para gastos médicos con custodia en contrato</p>
+      </div>
+    </div>
+    <div class="wallet">
+      <span id="red" class="badge neutral">Sin conexión</span>
+      <span id="roles" class="badge role" hidden></span>
+      <button id="btn-conectar" class="btn primary">Conectar MetaMask</button>
+    </div>
+  </header>
+
+  <main>
+    <p class="aviso">Red de pruebas: se usa ETH de testnet, sin valor real. El dinero queda dentro del contrato hasta que se alcance la meta; si el plazo vence sin alcanzarla, cada donante recupera su aporte.</p>
+
+    <nav class="tabs" role="tablist">
+      <button class="tab activa" data-tab="campanias">Campañas</button>
+      <button class="tab" data-tab="crear">Crear campaña</button>
+      <button class="tab" data-tab="recibos">Mis recibos</button>
+    </nav>
+
+    <section id="tab-campanias" class="panel">
+      <div class="panel-head">
+        <h2>Campañas</h2>
+        <button id="btn-recargar" class="btn ghost">Actualizar</button>
+      </div>
+      <div id="lista" class="lista"><p class="vacio">Cargando…</p></div>
+    </section>
+
+    <section id="tab-crear" class="panel" hidden>
+      <h2>Crear una campaña</h2>
+      <p class="ayuda">Queda <strong>Pendiente</strong> hasta que un verificador (en producción, un médico habilitado) la apruebe y fije el monto máximo. Los documentos médicos no se suben a ningún lado: solo se guarda su huella (hash).</p>
+      <form id="form-crear" class="form">
+        <label>Quién cobra los fondos (paciente, clínica o proveedor)
+          <input id="c-destinatario" placeholder="0x…" autocomplete="off" required>
+        </label>
+        <label>Meta solicitada (ETH)
+          <input id="c-meta" type="number" step="any" min="0" placeholder="1.5" required>
+        </label>
+        <label>Duración una vez verificada (días, de 1 a 180)
+          <input id="c-dias" type="number" min="1" max="180" value="30" required>
+        </label>
+        <label>Documentación médica (se calcula la huella en tu navegador; el archivo no se envía)
+          <input id="c-archivo" type="file">
+        </label>
+        <label>…o pegá directamente una huella (hash de 32 bytes)
+          <input id="c-hash" placeholder="0x… (66 caracteres)" autocomplete="off">
+        </label>
+        <button class="btn primary" type="submit">Crear campaña</button>
+      </form>
+    </section>
+
+    <section id="tab-recibos" class="panel" hidden>
+      <div class="panel-head">
+        <h2>Mis recibos (NFT)</h2>
+        <button id="btn-recargar-recibos" class="btn ghost">Actualizar</button>
+      </div>
+      <div id="recibos" class="lista"><p class="vacio">Conectá tu billetera para ver tus recibos.</p></div>
+    </section>
+  </main>
+
+  <footer class="pie">
+    <span id="direcciones"></span>
+  </footer>
+
+  <div id="toasts" aria-live="polite"></div>
+
+  <script src="vendor/ethers.umd.min.js"></script>
+  <script src="config.js"></script>
+  <script src="abi.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

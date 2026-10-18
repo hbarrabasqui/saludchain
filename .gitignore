@@ -1,0 +1,21 @@
+# Foundry
+out/
+cache/
+broadcast/
+# Secretos y entorno
+.env
+.env.*
+!.env.example
+# Frontend
+node_modules/
+.next/
+dist/
+# Sistema
+.DS_Store
+Thumbs.db
+
+# Carpeta temporal de limpieza (no va al repositorio)
+_to_delete/
+
+# Notas internas para Claude Code (no van al repo)
+CLAUDE.md

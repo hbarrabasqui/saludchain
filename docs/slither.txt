@@ -1,0 +1,39 @@
+# Slither 0.11.6 sobre SaludChain (src/), comando: slither . --filter-paths "lib|test|script"
+
+'forge clean' running (wd: <repo>)
+'forge config --json' running
+'forge build --build-info --deny never --skip ./test/** ./script/** --force' running (wd: <repo>)
+INFO:Detectors:
+Detector: incorrect-equality
+SaludChain.estadoActual(uint256) (src/SaludChain.sol#353-358) uses a dangerous strict equality:
+	- c.estado == Estado.Activa && block.timestamp > c.plazo (src/SaludChain.sol#356)
+Reference: https://github.com/crytic/slither/wiki/Detector-Documentation#dangerous-strict-equalities
+INFO:Detectors:
+Detector: timestamp
+SaludChain.donar(uint256) (src/SaludChain.sol#269-291) uses timestamp for comparisons
+	Dangerous comparisons:
+	- block.timestamp > c.plazo (src/SaludChain.sol#273)
+SaludChain.reclamarDevolucion(uint256) (src/SaludChain.sol#314-329) uses timestamp for comparisons
+	Dangerous comparisons:
+	- c.estado != Estado.Activa || block.timestamp <= c.plazo (src/SaludChain.sol#317)
+SaludChain.campania(uint256) (src/SaludChain.sol#344-348) uses timestamp for comparisons
+	Dangerous comparisons:
+	- c.destinatario == address(0) (src/SaludChain.sol#346)
+SaludChain.estadoActual(uint256) (src/SaludChain.sol#353-358) uses timestamp for comparisons
+	Dangerous comparisons:
+	- c.destinatario == address(0) (src/SaludChain.sol#355)
+	- c.estado == Estado.Activa && block.timestamp > c.plazo (src/SaludChain.sol#356)
+Reference: https://github.com/crytic/slither/wiki/Detector-Documentation#block-timestamp
+INFO:Detectors:
+Detector: low-level-calls
+Low level call in SaludChain.retirar(uint256) (src/SaludChain.sol#297-309):
+	- (ok,None) = address(c.destinatario).call{value: c.recaudado}() (src/SaludChain.sol#307)
+Low level call in SaludChain.reclamarDevolucion(uint256) (src/SaludChain.sol#314-329):
+	- (ok,None) = address(msg.sender).call{value: monto}() (src/SaludChain.sol#327)
+Reference: https://github.com/crytic/slither/wiki/Detector-Documentation#low-level-calls
+INFO:Detectors:
+Detector: naming-convention
+Variable Recibo.SALUDCHAIN (src/Recibo.sol#25) is not in mixedCase
+Variable SaludChain.RECIBO (src/SaludChain.sol#68) is not in mixedCase
+Reference: https://github.com/crytic/slither/wiki/Detector-Documentation#conformance-to-solidity-naming-conventions
+INFO:Slither:. analyzed (22 contracts with 102 detectors), 9 result(s) found

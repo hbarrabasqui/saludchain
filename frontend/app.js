@@ -1,0 +1,283 @@
+/* SaludChain – frontend sin build. Habla directo con los contratos mediante ethers.js + MetaMask. */
+(() => {
+  "use strict";
+  const { BrowserProvider, JsonRpcProvider, Contract, Interface, parseEther, formatEther, getAddress, keccak256, ZeroAddress } = ethers;
+  const cfg = window.SALUDCHAIN_CONFIG;
+  const ESTADOS = ["Pendiente", "Activa", "Cumplida", "Liberada", "Vencida"];
+  const $ = (s) => document.querySelector(s);
+  const esc = (t) => String(t).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const eth = (wei) => { const n = Number(formatEther(wei)); return n.toLocaleString("es-AR", { maximumFractionDigits: 6 }); };
+  const corta = (a) => `${a.slice(0, 6)}…${a.slice(-4)}`;
+  const fecha = (ts) => new Date(Number(ts) * 1000).toLocaleString("es-AR", { dateStyle: "medium", timeStyle: "short" });
+
+  const ifaz = new Interface(window.SALUDCHAIN_ABI);
+  const lector = new JsonRpcProvider(cfg.rpcUrl, cfg.chainId, { staticNetwork: true });
+  const scLectura = new Contract(cfg.saludChain, window.SALUDCHAIN_ABI, lector);
+  const reciboLectura = new Contract(cfg.recibo, window.RECIBO_ABI, lector);
+
+  let signer = null, cuenta = null, scEscritura = null, esVerificador = false, esAdmin = false;
+  const configurado = cfg.saludChain !== ZeroAddress;
+
+  /* ---------- billetera (EIP-6963: usa MetaMask aunque haya otras billeteras instaladas) ---------- */
+  const descubiertas = [];
+  window.addEventListener("eip6963:announceProvider", (ev) => descubiertas.push(ev.detail));
+  window.dispatchEvent(new Event("eip6963:requestProvider"));
+  const billetera = () => (descubiertas.find((d) => d.info.rdns === "io.metamask") || descubiertas[0])?.provider || window.ethereum || null;
+
+  /* ---------- avisos ---------- */
+  function toast(html, tipo = "") {
+    const d = document.createElement("div");
+    d.className = `toast ${tipo}`;
+    d.innerHTML = html;
+    const caja = $("#toasts");
+    caja.appendChild(d);
+    while (caja.children.length > 3) caja.firstChild.remove(); // no acumular avisos
+    setTimeout(() => d.remove(), tipo === "error" ? 9000 : 6000);
+    return d;
+  }
+  const enlaceTx = (h) => `<a href="${esc(cfg.explorer)}/tx/${esc(h)}" target="_blank" rel="noopener">ver transacción</a>`;
+
+  function mensajeError(e) {
+    if (e?.code === "ACTION_REJECTED" || e?.code === 4001 || e?.info?.error?.code === 4001) return "Rechazaste la operación en la billetera.";
+    let r = e?.revert;
+    if (!r) {
+      const data = e?.data || e?.info?.error?.data?.data || e?.error?.data;
+      if (typeof data === "string" && data.startsWith("0x")) { try { r = ifaz.parseError(data); } catch { /* sin decodificar */ } }
+    }
+    if (r) {
+      const a = r.args || [];
+      switch (r.name) {
+        case "EstadoInvalido": return `La campaña está en estado «${ESTADOS[Number(a[1])]}» y no admite esta operación.`;
+        case "ExcedeMeta": return `La donación supera lo que falta para la meta (faltan ${eth(a[0])} ETH).`;
+        case "MontoCero": return "El monto debe ser mayor que cero.";
+        case "PlazoVencido": return "La campaña ya superó su plazo.";
+        case "NoEsDestinatario": return "Solo el destinatario de la campaña puede retirar los fondos.";
+        case "DevolucionNoDisponible": return "Todavía no hay devolución: la campaña no venció o ya alcanzó su meta.";
+        case "SinAportes": return "No tenés aportes para recuperar en esta campaña.";
+        case "MontoAprobadoInvalido": return `El monto aprobado debe ser mayor que cero y no superar la meta solicitada (${eth(a[1])} ETH).`;
+        case "AccessControlUnauthorizedAccount": return "Tu cuenta no tiene permiso de verificador.";
+        case "DuracionInvalida": return "La duración debe estar entre 1 y 180 días.";
+        case "HashDocsInvalido": return "Falta la huella de la documentación.";
+        case "DireccionInvalida": return "Dirección inválida.";
+        case "MetaInvalida": return "La meta debe ser mayor que cero.";
+        case "CampaniaInexistente": return "La campaña no existe.";
+        case "TransferenciaFallida": return "Falló la transferencia de ETH.";
+        default: return `El contrato rechazó la operación (${r.name}).`;
+      }
+    }
+    return e?.shortMessage || e?.reason || e?.message || "Error desconocido";
+  }
+
+  /* ---------- conexión ---------- */
+  async function asegurarRed() {
+    const hex = "0x" + cfg.chainId.toString(16);
+    const w = billetera();
+    const actual = await w.request({ method: "eth_chainId" });
+    if (actual.toLowerCase() === hex) return;
+    try {
+      await w.request({ method: "wallet_switchEthereumChain", params: [{ chainId: hex }] });
+    } catch (e) {
+      if (e?.code === 4902 && cfg.chainParams) {
+        await w.request({ method: "wallet_addEthereumChain", params: [cfg.chainParams] });
+      } else { throw e; }
+    }
+  }
+
+  async function conectar(silencioso = false) {
+    const w = billetera();
+    if (!w) { if (!silencioso) toast("No se encontró MetaMask. Instalalo para poder operar.", "error"); return; }
+    try {
+      const prov = new BrowserProvider(w);
+      if (silencioso) {
+        const cuentas = await w.request({ method: "eth_accounts" });
+        if (!cuentas.length) return;
+      } else {
+        await prov.send("eth_requestAccounts", []);
+      }
+      await asegurarRed();
+      signer = await prov.getSigner();
+      cuenta = await signer.getAddress();
+      scEscritura = new Contract(cfg.saludChain, window.SALUDCHAIN_ABI, signer);
+      const [rolV, rolA] = await Promise.all([scLectura.VERIFICADOR_ROLE(), scLectura.DEFAULT_ADMIN_ROLE()]);
+      [esVerificador, esAdmin] = await Promise.all([scLectura.hasRole(rolV, cuenta), scLectura.hasRole(rolA, cuenta)]);
+      pintarCabecera();
+      if (!$("#c-destinatario").value) $("#c-destinatario").value = cuenta;
+      await Promise.all([cargarCampanias(), cargarRecibos()]);
+    } catch (e) {
+      toast(esc(mensajeError(e)), "error");
+    }
+  }
+
+  function pintarCabecera() {
+    const red = $("#red");
+    red.textContent = cuenta ? `${cfg.chainName} · ${corta(cuenta)}` : cfg.chainName;
+    red.className = "badge " + (cuenta ? "ok" : "neutral");
+    const roles = [esVerificador && "Verificador", esAdmin && "Admin"].filter(Boolean).join(" + ");
+    $("#roles").hidden = !roles;
+    $("#roles").textContent = roles;
+    $("#btn-conectar").textContent = cuenta ? "Conectado" : "Conectar MetaMask";
+    $("#btn-conectar").disabled = !!cuenta;
+  }
+
+  /* ---------- transacciones ---------- */
+  async function enviar(descripcion, fn) {
+    if (!scEscritura) { toast("Conectá tu billetera primero.", "error"); return; }
+    try {
+      toast(`${esc(descripcion)}: confirmá en tu billetera…`);
+      const tx = await fn();
+      toast(`Transacción enviada. ${enlaceTx(tx.hash)}`);
+      await tx.wait();
+      toast(`${esc(descripcion)}: confirmada. ${enlaceTx(tx.hash)}`, "ok");
+      await Promise.all([cargarCampanias(), cargarRecibos()]);
+    } catch (e) {
+      toast(esc(mensajeError(e)), "error");
+    }
+  }
+
+  /* ---------- campañas ---------- */
+  async function cargarCampanias() {
+    const cont = $("#lista");
+    if (!configurado) { cont.innerHTML = '<p class="vacio">Faltan configurar las direcciones de los contratos (config.js).</p>'; return; }
+    try {
+      const total = Number(await scLectura.totalCampanias());
+      if (!total) { cont.innerHTML = '<p class="vacio">Todavía no hay campañas. Creá la primera desde la pestaña «Crear campaña».</p>'; return; }
+      const ids = Array.from({ length: total }, (_, i) => total - i);
+      const datos = await Promise.all(ids.map(async (id) => {
+        const [c, estado, aporte] = await Promise.all([
+          scLectura.campania(id), scLectura.estadoActual(id), cuenta ? scLectura.aporteDe(id, cuenta) : 0n,
+        ]);
+        return { id, c, estado: Number(estado), aporte };
+      }));
+      cont.innerHTML = datos.map(tarjeta).join("");
+    } catch (e) {
+      cont.innerHTML = `<p class="vacio">No se pudieron leer las campañas: ${esc(mensajeError(e))}</p>`;
+    }
+  }
+
+  function tarjeta({ id, c, estado, aporte }) {
+    const nombre = ESTADOS[estado];
+    const meta = c.meta, rec = c.recaudado;
+    const pct = meta > 0n ? Number((rec * 10000n) / meta) / 100 : 0;
+    const plazoTxt = c.plazo > 0n ? `Plazo: <b>${esc(fecha(c.plazo))}</b>` : `Duración: <b>${Number(c.duracion) / 86400} días</b> desde la verificación`;
+    const esDest = cuenta && cuenta.toLowerCase() === c.destinatario.toLowerCase();
+    let acciones = "";
+    if (estado === 0) {
+      acciones = esVerificador
+        ? `<input id="ver-${id}" type="number" step="any" min="0" value="${esc(formatEther(meta))}" aria-label="Monto aprobado en ETH">
+           <button class="btn primary" data-accion="verificar" data-id="${id}">Aprobar campaña</button>
+           <span class="nota">Monto aprobado (ETH, máximo lo solicitado)</span>`
+        : `<span class="nota">Esperando que un verificador la apruebe.</span>`;
+    } else if (estado === 1) {
+      const falta = meta - rec;
+      acciones = cuenta
+        ? `<input id="don-${id}" type="number" step="any" min="0" placeholder="ETH" aria-label="Monto a donar en ETH">
+           <button class="btn primary" data-accion="donar" data-id="${id}">Donar</button>
+           <span class="nota">Faltan ${eth(falta)} ETH para la meta</span>`
+        : `<span class="nota">Conectá tu billetera para donar.</span>`;
+    } else if (estado === 2) {
+      acciones = esDest
+        ? `<button class="btn primary" data-accion="retirar" data-id="${id}">Retirar fondos</button>
+           <span class="nota">¡Meta alcanzada! Sos el destinatario.</span>`
+        : `<span class="nota">Meta alcanzada. Campaña cerrada con éxito; el destinatario puede retirar los fondos.</span>`;
+    } else if (estado === 3) {
+      acciones = `<span class="nota">Cerrada con éxito: los fondos fueron entregados al destinatario.</span>`;
+    } else {
+      acciones = aporte > 0n
+        ? `<button class="btn primary" data-accion="devolucion" data-id="${id}">Recuperar mi aporte (${eth(aporte)} ETH)</button>`
+        : `<span class="nota">Venció sin alcanzar la meta: cada donante puede recuperar su aporte.</span>`;
+    }
+    return `<article class="card" data-id="${id}">
+      <div class="card-head"><h3>Campaña #${id}</h3><span class="badge ${nombre.toLowerCase()}">${nombre}</span></div>
+      <div class="barra" role="progressbar" aria-valuenow="${Math.min(pct, 100)}" aria-valuemin="0" aria-valuemax="100"><span style="width:${Math.min(pct, 100)}%"></span></div>
+      <div class="cifras"><span><b>${eth(rec)}</b> ETH recaudados</span><span>Meta: <b>${eth(meta)}</b> ETH (${pct.toFixed(1)}%)</span></div>
+      <div class="meta">
+        <span>Destinatario: <b class="mono">${esc(c.destinatario)}</b></span>
+        <span>${plazoTxt}</span>
+        <span>Huella de documentación: <b class="mono">${esc(c.hashDocs)}</b></span>
+        ${aporte > 0n ? `<span>Mi aporte: <b>${eth(aporte)} ETH</b></span>` : ""}
+      </div>
+      <div class="acciones">${acciones}</div>
+    </article>`;
+  }
+
+  $("#lista").addEventListener("click", (ev) => {
+    const b = ev.target.closest("button[data-accion]");
+    if (!b) return;
+    const id = BigInt(b.dataset.id);
+    const num = (sel) => { const v = $(sel).value.trim(); if (!v || Number(v) <= 0) throw new Error("Ingresá un monto mayor que cero."); return parseEther(v); };
+    try {
+      switch (b.dataset.accion) {
+        case "donar": { const v = num(`#don-${id}`); enviar(`Donar ${eth(v)} ETH`, () => scEscritura.donar(id, { value: v })); break; }
+        case "verificar": { const v = num(`#ver-${id}`); enviar("Aprobar campaña", () => scEscritura.verificar(id, v)); break; }
+        case "retirar": enviar("Retirar fondos", () => scEscritura.retirar(id)); break;
+        case "devolucion": enviar("Recuperar aporte", () => scEscritura.reclamarDevolucion(id)); break;
+      }
+    } catch (e) { toast(esc(e.message), "error"); }
+  });
+
+  /* ---------- crear campaña ---------- */
+  $("#form-crear").addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    try {
+      const destinatario = getAddress($("#c-destinatario").value.trim());
+      const meta = parseEther($("#c-meta").value.trim());
+      const dias = BigInt(Math.trunc(Number($("#c-dias").value)));
+      const archivo = $("#c-archivo").files[0];
+      let hash = $("#c-hash").value.trim();
+      if (archivo) hash = keccak256(new Uint8Array(await archivo.arrayBuffer()));
+      if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) throw new Error("Elegí un archivo o pegá una huella de 32 bytes (0x + 64 caracteres).");
+      await enviar("Crear campaña", () => scEscritura.crearCampania(destinatario, meta, dias * 86400n, hash));
+      $("#form-crear").reset();
+      if (cuenta) $("#c-destinatario").value = cuenta;
+      cambiarTab("campanias");
+    } catch (e) { toast(esc(e.shortMessage || e.message), "error"); }
+  });
+
+  /* ---------- recibos (NFT) ---------- */
+  async function cargarRecibos() {
+    const cont = $("#recibos");
+    if (!configurado) return;
+    if (!cuenta) { cont.innerHTML = '<p class="vacio">Conectá tu billetera para ver tus recibos.</p>'; return; }
+    try {
+      const ultimo = await lector.getBlockNumber();
+      const filtro = reciboLectura.filters.ReciboEmitido(null, cuenta);
+      let eventos = [];
+      for (let desde = cfg.deployBlock; desde <= ultimo; desde += 40000) {
+        eventos = eventos.concat(await reciboLectura.queryFilter(filtro, desde, Math.min(desde + 39999, ultimo)));
+      }
+      if (!eventos.length) { cont.innerHTML = '<p class="vacio">Todavía no tenés recibos. Cada donación emite uno.</p>'; return; }
+      const items = await Promise.all(eventos.reverse().map(async (e) => {
+        const uri = await reciboLectura.tokenURI(e.args.reciboId);
+        const json = JSON.parse(atob(uri.split(",")[1]));
+        return { id: e.args.reciboId, campania: e.args.campaniaId, monto: e.args.monto, nombre: json.name };
+      }));
+      cont.innerHTML = items.map((r) => `<article class="card recibo"><div class="nft">NFT</div>
+        <div><h3>${esc(r.nombre)}</h3><div class="meta"><span>Campaña: <b>#${r.campania}</b></span><span>Monto donado: <b>${eth(r.monto)} ETH</b></span></div></div></article>`).join("");
+    } catch (e) {
+      cont.innerHTML = `<p class="vacio">No se pudieron leer los recibos: ${esc(mensajeError(e))}</p>`;
+    }
+  }
+
+  /* ---------- pestañas y arranque ---------- */
+  function cambiarTab(nombre) {
+    document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("activa", t.dataset.tab === nombre));
+    ["campanias", "crear", "recibos"].forEach((n) => { $(`#tab-${n}`).hidden = n !== nombre; });
+  }
+  document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () => cambiarTab(t.dataset.tab)));
+  $("#btn-conectar").addEventListener("click", () => conectar(false));
+  $("#btn-recargar").addEventListener("click", cargarCampanias);
+  $("#btn-recargar-recibos").addEventListener("click", cargarRecibos);
+
+  const w0 = billetera();
+  if (w0) {
+    w0.on?.("accountsChanged", () => { cuenta = null; scEscritura = null; esVerificador = esAdmin = false; pintarCabecera(); conectar(true); cargarCampanias(); });
+    w0.on?.("chainChanged", () => location.reload());
+  }
+
+  $("#direcciones").innerHTML = configurado
+    ? `SaludChain: <a href="${esc(cfg.explorer)}/address/${esc(cfg.saludChain)}" target="_blank" rel="noopener">${esc(cfg.saludChain)}</a> · Recibo: <a href="${esc(cfg.explorer)}/address/${esc(cfg.recibo)}" target="_blank" rel="noopener">${esc(cfg.recibo)}</a>`
+    : "Contratos sin configurar (completar config.js luego del despliegue).";
+  pintarCabecera();
+  cargarCampanias();
+  conectar(true);
+})();
