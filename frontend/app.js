@@ -185,7 +185,8 @@
       .sort((x, y) => (y.m > x.m ? 1 : y.m < x.m ? -1 : 0));
   }
 
-  const COLORES = ["#0f766e", "#1d4ed8", "#b45309", "#7c3aed", "#be185d", "#475569"];
+  // Paleta propia del reparto: sin verdes ni el azul/rojo de los estados, para no confundirla con la barra de progreso.
+  const COLORES = ["#7c3aed", "#ea580c", "#db2777", "#0891b2", "#a16207", "#4b5563"];
   function graficoDonantes(aportes, destinatario, recaudado) {
     if (!aportes.length) return "";
     const identificado = aportes.reduce((s, x) => s + x.m, 0n);
@@ -271,7 +272,7 @@
         ? `<button class="btn primary" data-accion="devolucion" data-id="${id}">Recuperar mi aporte (${eth(aporte)} ETH)</button>`
         : `<span class="nota">Venció sin alcanzar la meta: cada donante puede recuperar su aporte.</span>`;
     }
-    return `<article class="card" data-id="${id}">
+    return `<article class="card estado-${nombre.toLowerCase()}" data-id="${id}">
       <div class="card-head"><h3>Campaña #${id}</h3><span class="badge ${nombre.toLowerCase()}">${nombre}</span></div>
       <div class="barra" role="progressbar" aria-valuenow="${Math.min(pct, 100)}" aria-valuemin="0" aria-valuemax="100"><span style="width:${Math.min(pct, 100)}%"></span></div>
       <div class="cifras"><span><b>${eth(rec)}</b> ETH recaudados</span><span>Meta: <b>${eth(meta)}</b> ETH (${pct.toFixed(1)}%)</span></div>

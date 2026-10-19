@@ -47,9 +47,20 @@ input:focus{outline:2px solid #99d6cf;border-color:var(--brand)}
 .acciones{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px;padding-top:12px;border-top:1px dashed var(--line)}
 .acciones input{width:150px}
 .acciones .nota{color:var(--muted);font-size:.85rem}
+/* Color de cada campaña según su estado (coincide con la etiqueta) */
+.card.estado-pendiente{border-left:5px solid #f59e0b}
+.card.estado-activa{border-left:5px solid #1d4ed8}
+.card.estado-cumplida{border-left:5px solid #15803d}
+.card.estado-liberada{border-left:5px solid #64748b;background:#f1f5f9}
+.card.estado-vencida{border-left:5px solid #b91c1c}
+.estado-pendiente .barra>span{background:#fbbf24}
+.estado-activa .barra>span{background:linear-gradient(90deg,#60a5fa,#1d4ed8)}
+.estado-cumplida .barra>span{background:linear-gradient(90deg,#4ade80,#15803d)}
+.estado-liberada .barra>span{background:#94a3b8}
+.estado-vencida .barra>span{background:linear-gradient(90deg,#f87171,#b91c1c)}
 .donantes{margin:2px 0 10px}
 .donantes h4{margin:0 0 6px;font-size:.9rem}
-.reparto{display:flex;gap:2px;height:14px;border-radius:999px;overflow:hidden;background:#e8eef5}
+.reparto{display:flex;gap:2px;height:9px;border-radius:999px;overflow:hidden;background:#e8eef5}
 .reparto>span{display:block;height:100%;min-width:3px}
 .donantes ul{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:5px;font-size:.88rem}
 .donantes li{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
