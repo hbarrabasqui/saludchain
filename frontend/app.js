@@ -134,6 +134,89 @@
     }
   }
 
+  /* ---------- recibos (leídos del estado del contrato, sin logs) ---------- */
+  // Cada donación emite un recibo NFT numerado 1, 2, 3… Se leen directo del contrato (ownerOf + datosDe):
+  // así sirve para el gráfico de aportes y para «Mis recibos», y funciona en cualquier nodo (los públicos
+  // borran los logs viejos, por eso no se usan eventos). Se guarda lo ya leído y después solo se pide lo nuevo.
+  const recibos = new Map(); // id -> { id, owner, campania, monto }
+  let proximoRecibo = 1;
+  const noExiste = (e) => e?.code === "CALL_EXCEPTION"; // el id todavía no fue emitido
+
+  async function leerRecibo(id) {
+    try {
+      const [owner, d] = await Promise.all([reciboLectura.ownerOf(id), reciboLectura.datosDe(id)]);
+      return { id, owner: getAddress(owner), campania: d.campaniaId, monto: d.monto };
+    } catch (e) { if (noExiste(e)) return null; throw e; }
+  }
+
+  async function actualizarRecibos() {
+    // Los recibos son transferibles: se vuelve a leer quién es el dueño actual de los ya conocidos.
+    await Promise.all([...recibos.keys()].map(async (id) => {
+      const r = await leerRecibo(id);
+      if (r) recibos.set(id, r);
+    }));
+    for (;;) {
+      const lote = await Promise.all(Array.from({ length: 10 }, (_, i) => leerRecibo(proximoRecibo + i)));
+      for (const r of lote) {
+        if (!r) return;
+        recibos.set(r.id, r);
+        proximoRecibo = r.id + 1;
+      }
+    }
+  }
+  let leyendoRecibos = null; // si dos secciones piden a la vez, comparten la misma lectura
+  const asegurarRecibos = () => (leyendoRecibos ??= actualizarRecibos().finally(() => { leyendoRecibos = null; }));
+
+  /* ---------- donantes por campaña ---------- */
+  // Se toman los dueños de los recibos de la campaña y el monto de cada billetera se lee del contrato con
+  // aporteDe(): así una devolución se refleja sola. (Si un recibo se transfirió, ese aporte no se atribuye
+  // a nadie y el gráfico lo muestra aparte, como «sin identificar».)
+  function donantesDe(id) {
+    const s = new Set();
+    for (const r of recibos.values()) if (r.campania === BigInt(id)) s.add(r.owner);
+    return [...s];
+  }
+
+  async function aportesDe(id) {
+    const direcciones = donantesDe(id);
+    const montos = await Promise.all(direcciones.map((a) => scLectura.aporteDe(id, a)));
+    return direcciones.map((a, i) => ({ a, m: montos[i] }))
+      .filter((x) => x.m > 0n)
+      .sort((x, y) => (y.m > x.m ? 1 : y.m < x.m ? -1 : 0));
+  }
+
+  const COLORES = ["#0f766e", "#1d4ed8", "#b45309", "#7c3aed", "#be185d", "#475569"];
+  function graficoDonantes(aportes, destinatario, recaudado) {
+    if (!aportes.length) return "";
+    const identificado = aportes.reduce((s, x) => s + x.m, 0n);
+    const total = recaudado > identificado ? recaudado : identificado; // porcentajes sobre lo recaudado
+    const dest = destinatario.toLowerCase(), yo = cuenta ? cuenta.toLowerCase() : "";
+    const pctDe = (m) => Number((m * 10000n) / total) / 100;
+    const filas = aportes.map((x, i) => ({ ...x, pct: pctDe(x.m), color: COLORES[i % COLORES.length] }));
+    const resto = total - identificado; // aportes cuyo recibo cambió de dueño
+    let segmentos = filas.map((f) =>
+      `<span style="width:${f.pct}%;background:${f.color}" title="${esc(f.a)}: ${eth(f.m)} ETH (${f.pct.toFixed(1)}%)"></span>`).join("");
+    let lista = filas.map((f) => {
+      const tags = (f.a.toLowerCase() === dest ? '<span class="tag">destinatario</span>' : "") +
+        (f.a.toLowerCase() === yo ? '<span class="tag yo">vos</span>' : "");
+      return `<li><i class="punto" style="background:${f.color}"></i><span class="mono" title="${esc(f.a)}">${esc(corta(f.a))}</span>${tags}
+        <span class="pct">${eth(f.m)} ETH · ${f.pct.toFixed(1)}%</span></li>`;
+    }).join("");
+    if (resto > 0n) {
+      segmentos += `<span style="width:${pctDe(resto)}%;background:#cbd5e1" title="Sin identificar"></span>`;
+      lista += `<li><i class="punto" style="background:#cbd5e1"></i><span>Sin identificar (recibo transferido)</span>
+        <span class="pct">${eth(resto)} ETH · ${pctDe(resto).toFixed(1)}%</span></li>`;
+    }
+    const propio = filas.find((f) => f.a.toLowerCase() === dest);
+    const aviso = propio ? `<p class="nota-d">El destinatario aportó el ${propio.pct.toFixed(1)}% del total.</p>` : "";
+    const n = filas.length;
+    return `<div class="donantes">
+      <h4>${n} ${n === 1 ? "billetera aportó" : "billeteras distintas aportaron"}</h4>
+      <div class="reparto" role="img" aria-label="Reparto de aportes por billetera">${segmentos}</div>
+      <ul>${lista}</ul>${aviso}
+    </div>`;
+  }
+
   /* ---------- campañas ---------- */
   async function cargarCampanias() {
     const cont = $("#lista");
@@ -142,11 +225,13 @@
       const total = Number(await scLectura.totalCampanias());
       if (!total) { cont.innerHTML = '<p class="vacio">Todavía no hay campañas. Creá la primera desde la pestaña «Crear campaña».</p>'; return; }
       const ids = Array.from({ length: total }, (_, i) => total - i);
+      // Si falla la lectura de eventos, igual se muestran las campañas (sin el reparto de aportes).
+      try { await asegurarRecibos(); } catch { /* se reintenta en la próxima carga */ }
       const datos = await Promise.all(ids.map(async (id) => {
-        const [c, estado, aporte] = await Promise.all([
-          scLectura.campania(id), scLectura.estadoActual(id), cuenta ? scLectura.aporteDe(id, cuenta) : 0n,
+        const [c, estado, aporte, aportes] = await Promise.all([
+          scLectura.campania(id), scLectura.estadoActual(id), cuenta ? scLectura.aporteDe(id, cuenta) : 0n, aportesDe(id),
         ]);
-        return { id, c, estado: Number(estado), aporte };
+        return { id, c, estado: Number(estado), aporte, aportes };
       }));
       cont.innerHTML = datos.map(tarjeta).join("");
     } catch (e) {
@@ -154,7 +239,7 @@
     }
   }
 
-  function tarjeta({ id, c, estado, aporte }) {
+  function tarjeta({ id, c, estado, aporte, aportes }) {
     const nombre = ESTADOS[estado];
     const meta = c.meta, rec = c.recaudado;
     const pct = meta > 0n ? Number((rec * 10000n) / meta) / 100 : 0;
@@ -196,6 +281,7 @@
         <span>Huella de documentación: <b class="mono">${esc(c.hashDocs)}</b></span>
         ${aporte > 0n ? `<span>Mi aporte: <b>${eth(aporte)} ETH</b></span>` : ""}
       </div>
+      ${graficoDonantes(aportes, c.destinatario, rec)}
       <div class="acciones">${acciones}</div>
     </article>`;
   }
@@ -239,20 +325,11 @@
     if (!configurado) return;
     if (!cuenta) { cont.innerHTML = '<p class="vacio">Conectá tu billetera para ver tus recibos.</p>'; return; }
     try {
-      const ultimo = await lector.getBlockNumber();
-      const filtro = reciboLectura.filters.ReciboEmitido(null, cuenta);
-      let eventos = [];
-      for (let desde = cfg.deployBlock; desde <= ultimo; desde += 40000) {
-        eventos = eventos.concat(await reciboLectura.queryFilter(filtro, desde, Math.min(desde + 39999, ultimo)));
-      }
-      if (!eventos.length) { cont.innerHTML = '<p class="vacio">Todavía no tenés recibos. Cada donación emite uno.</p>'; return; }
-      const items = await Promise.all(eventos.reverse().map(async (e) => {
-        const uri = await reciboLectura.tokenURI(e.args.reciboId);
-        const json = JSON.parse(atob(uri.split(",")[1]));
-        return { id: e.args.reciboId, campania: e.args.campaniaId, monto: e.args.monto, nombre: json.name };
-      }));
-      cont.innerHTML = items.map((r) => `<article class="card recibo"><div class="nft">NFT</div>
-        <div><h3>${esc(r.nombre)}</h3><div class="meta"><span>Campaña: <b>#${r.campania}</b></span><span>Monto donado: <b>${eth(r.monto)} ETH</b></span></div></div></article>`).join("");
+      await asegurarRecibos();
+      const mios = [...recibos.values()].filter((r) => r.owner === cuenta).sort((a, b) => b.id - a.id); // el más nuevo primero
+      if (!mios.length) { cont.innerHTML = '<p class="vacio">Todavía no tenés recibos. Cada donación emite uno.</p>'; return; }
+      cont.innerHTML = mios.map((r) => `<article class="card recibo"><div class="nft">NFT</div>
+        <div><h3>Recibo SaludChain #${r.id}</h3><div class="meta"><span>Campaña: <b>#${r.campania}</b></span><span>Monto donado: <b>${eth(r.monto)} ETH</b></span></div></div></article>`).join("");
     } catch (e) {
       cont.innerHTML = `<p class="vacio">No se pudieron leer los recibos: ${esc(mensajeError(e))}</p>`;
     }

@@ -33,5 +33,6 @@ window.SALUDCHAIN_ABI = [
 window.RECIBO_ABI = [
   "function tokenURI(uint256 reciboId) view returns (string)",
   "function ownerOf(uint256 tokenId) view returns (address)",
+  "function datosDe(uint256 reciboId) view returns (tuple(uint256 campaniaId, uint256 monto, uint64 fecha))",
   "event ReciboEmitido(uint256 indexed reciboId, address indexed donante, uint256 indexed campaniaId, uint256 monto)",
 ];

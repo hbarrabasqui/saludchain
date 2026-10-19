@@ -47,6 +47,17 @@ input:focus{outline:2px solid #99d6cf;border-color:var(--brand)}
 .acciones{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px;padding-top:12px;border-top:1px dashed var(--line)}
 .acciones input{width:150px}
 .acciones .nota{color:var(--muted);font-size:.85rem}
+.donantes{margin:2px 0 10px}
+.donantes h4{margin:0 0 6px;font-size:.9rem}
+.reparto{display:flex;gap:2px;height:14px;border-radius:999px;overflow:hidden;background:#e8eef5}
+.reparto>span{display:block;height:100%;min-width:3px}
+.donantes ul{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:5px;font-size:.88rem}
+.donantes li{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.punto{width:10px;height:10px;border-radius:50%;flex:none}
+.tag{display:inline-block;padding:1px 8px;border-radius:999px;font-size:.72rem;font-weight:600;background:#fef3c7;color:var(--warn)}
+.tag.yo{background:#dbeafe;color:var(--info)}
+.donantes .pct{margin-left:auto;font-weight:600}
+.nota-d{margin:6px 0 0;color:var(--warn);font-size:.82rem}
 .vacio{color:var(--muted);text-align:center;padding:24px}
 .pie{max-width:920px;margin:0 auto;padding:0 16px 30px;color:var(--muted);font-size:.78rem;word-break:break-all}
 #toasts{position:fixed;right:14px;bottom:14px;display:grid;gap:8px;max-width:min(420px,92vw);z-index:20}
