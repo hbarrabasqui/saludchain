@@ -82,6 +82,8 @@ La clave privada **nunca** se guarda en el repositorio: se usa un keystore de Fo
 
 Página estática (HTML + JavaScript + [ethers.js](https://docs.ethers.org/v6/)) en `frontend/`, sin proceso de compilación. Se conecta a los contratos reales mediante MetaMask; sin billetera conectada puede leer las campañas.
 
+**Versión publicada (GitHub Pages):** https://hbarrabasqui.github.io/saludchain/ — alcanza con MetaMask en la red Sepolia.
+
 ```bash
 # 1. Completar frontend/config.js con las direcciones desplegadas y el bloque de despliegue
 # 2. Servir la carpeta (cualquiera de las dos):
