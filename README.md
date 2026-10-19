@@ -26,6 +26,15 @@ Dos contratos que interactúan entre sí:
 
 Buenas prácticas aplicadas: NatSpec completo, eventos, custom errors, patrón checks-effects-interactions, `ReentrancyGuard`, contabilidad interna (no depende de `address(this).balance`), una lectura y una escritura de storage por variable en cada función.
 
+### ¿Por qué se dona en ETH y no en una stablecoin?
+
+Es una decisión de diseño del MVP, y también la limitación económica más importante:
+
+- **Por qué ETH hoy:** es la moneda nativa de la red, así que donar es una sola transacción (sin `approve` previo ni token adicional), el contrato es más simple y tiene menos superficie de ataque, y no depende de ningún emisor externo.
+- **Qué cuesta:** el valor del ETH varía entre que se dona y que el destinatario retira, y la meta está expresada en ETH. Para un gasto médico, que normalmente se presupuesta en moneda fuerte, lo lógico es una moneda estable.
+- **Mejora prevista (roadmap):** aceptar una stablecoin ERC-20 (USDC, DAI, USDT u otra) con metas expresadas en dólares, usando `SafeERC20` (USDT no sigue el estándar al pie de la letra). Opcionalmente, un *price feed* de Chainlink (ETH/USD) para mostrar y valuar en dólares las donaciones hechas en ETH. Ojo: Chainlink aporta el precio, no hace el cambio de moneda; convertir ETH en stablecoin automáticamente requeriría además un exchange descentralizado (por ejemplo Uniswap), con sus propios riesgos (comisiones, deslizamiento de precio, liquidez).
+- **Qué hay que considerar al elegir la stablecoin:** USDC y USDT dependen de un emisor centralizado que puede congelar fondos; DAI es más descentralizada pero está respaldada por colateral. En Sepolia no hay una stablecoin oficial de referencia, por lo que las pruebas usarían un token de prueba.
+
 ## Instalación y compilación
 
 Requisitos: [Foundry](https://book.getfoundry.sh/getting-started/installation) (en Windows, usar WSL) y Git.
