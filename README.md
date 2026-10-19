@@ -124,7 +124,16 @@ Gestión de roles (el admin le dio el rol de verificador a Kipu_3 y se lo quitó
 
 ## ¿Por qué blockchain?
 
-_(a completar)_
+_El crowdfunding tradicional para tratamientos o urgencias médicas enfrenta fricciones críticas: falta de transparencia en la custodia de los fondos, riesgo de desvío hacia fines distintos, comisiones elevadas de intermediarios y la posibilidad de que una campaña recaude fondos insuficientes sin que los donantes puedan recuperarlos.
+
+SaludChain resuelve estos problemas mediante la descentralización y la lógica de contratos inteligentes:
+
+Custodia programable y transparente (Escrow no custodial): Los fondos no son retenidos por una entidad centralizada, plataforma privada ni por el beneficiario por anticipado. Quedan bloqueados en el contrato `SaludChain.sol` bajo la regla determinista de "todo o nada".
+Garantía algorítmica de devolución: Si vence el plazo sin alcanzar la meta médica aprobada, el contrato permite a cada donante ejecutar `reclamarDevolucion()` de forma autónoma, sin depender de autorizaciones humanas ni procesos administrativos.
+Trazabilidad y comprobante inmutable (NFT Recibo): Cada donación emite automáticamente un comprobante ERC-721 (`Recibo.sol`) en la misma transacción, garantizando la prueba de participación, la contabilidad pública y evitando la adulteración de recibos de donación.
+Separación de roles y control de acceso: La incorporación de `VERIFICADOR_ROLE` (vía `AccessControl`) desacopla la creación de la campaña de su validación, impidiendo que metas arbitrarias o no avaladas entren en período de recaudación activa sin un filtro de legitimidad.
+
+_
 
 ## Limitaciones conocidas del MVP
 
@@ -138,8 +147,47 @@ _(el resto de las limitaciones se completa en equipo)_
 
 ## Marco legal y de riesgos
 
-_(a completar)_
+_Protección de Datos Personales y Sensibles (Ley 25.326 / GDPR)
+  Privacidad por diseño (Privacy by Design): Ningún dato de salud (diagnósticos, presupuestos detallados o datos filiatorios del paciente) se sube a la blockchain ni a servidores del frontend. 
+  Disociación criptográfica: La función `crearCampania` almacena únicamente un `hashDocs` (SHA-256) generado localmente en el navegador del usuario. El documento original permanece en poder del paciente/médico, haciendo técnicamente inviable la reconstrucción o filtración de datos de salud a partir del estado on-chain.
+Naturaleza Jurídica de los Fondos y Donaciones:
+ Las transferencias configuran donaciones sujetas a condición resolutoria expresa (alcanzar la meta dentro del plazo estipulado). El contrato inteligente actúa como una ejecución técnica automatizada de dicha condición (art. 343 y concs. del CCCN).
+* **Validez Probatoria del NFT:**
+  * El token ERC-721 opera exclusivamente como constancia digital de entrega de fondos (recibo no fungible) y principio de prueba de la liberalidad efectuada; no confiere derechos de propiedad sobre tratamientos ni constituye un activo financiero / valor negociable (security).
+
+### Matriz de Riesgos y Mitigaciones
+
+| Categoría | Riesgo Identificado | Impacto | Mitigación Implementada / Propuesta |
+| :--- | :--- | :--- | :--- |
+| Financiero | Volatilidad de ETH entre el inicio de campaña y el retiro | Alto | Alerta en UI sobre cotización. Planificado: migración a stablecoins (USDC/USDT) con oráculo Chainlink. |
+| Seguridad Smart Contracts | Vulnerabilidades de reentrancia o manipulación de balances | Crítico | Uso de `ReentrancyGuard`, patrón *Checks-Effects-Interactions*, contabilidad interna desacoplada de `address(this).balance` y análisis estático con Slither. |
+| Operativo / Fraude | Colusión o falsificación de presupuestos médicos | Alto | Implementación de `hashDocs` para cotejo pericial y rol `VERIFICADOR_ROLE`. En roadmap: firma criptográfica de profesionales matriculados. |
+| Legal / Compliance | Cumplimiento tributario y origen de fondos en montos elevados | Medio | Trazabilidad pública de transacciones en Explorer; la plataforma no custodia claves ni fondos (es meramente una interfaz no permisionada). |
+
+_
 
 ## Roadmap
 
-_(a completar)_
+_Fase 1: MVP Core (Completado)
+- [x] Arquitectura de contratos base (`SaludChain.sol` y `Recibo.sol` ERC-721).
+- [x] Control de acceso granular (`AccessControl`) y protección contra reentrancia (`ReentrancyGuard`).
+- [x] Lógica de depósito, meta estricta, retiro por *pull payment* y devolución automatizada.
+- [x] Suite de tests y cobertura exhaustiva en Foundry.
+- [x] Auditoría estática mediante Slither y mitigación de hallazgos.
+- [x] Despliegue y verificación en testnet Sepolia.
+- [x] Frontend estático Web3 en GitHub Pages con cálculo local de `hashDocs`.
+
+ Fase 2: Robustez Económica y Multi-Token (Corto Plazo)
+- [ ] Soporte para donaciones en stablecoins (USDC, USDT, DAI) utilizando la librería `SafeERC20`.
+- [ ] Integración de Chainlink Price Feeds (ETH/USD) para fijar metas médicas en moneda estable permitiendo pagos combinados.
+- [ ] Mecanismo de cancelación o cierre anticipado justificado por parte del creador o verificador con devolución automática de aportes.
+
+ Fase 3: Identidad y Gobernanza de la Verificación (Mediano Plazo)
+- [ ] Descentralización del rol de verificador: reemplazo de la EOA de confianza por un esquema multisig (Safe) o validación criptográfica contra colegios médicos / registros de prestadores de salud.
+- [ ] Soporte para liberación de fondos por hitos médicos comprobables (ej. 30% diagnóstico e internación, 70% intervención quirúrgica) mediante aprobación por etapas.
+- [ ] Implementación de Soulbound Tokens (SBT) no transferibles para los comprobantes de donación cuando aplique deducción impositiva.
+
+ Fase 4: Escalabilidad y UX (Largo Plazo)
+- [ ] Despliegue en redes de Capa 2 (L2) como Arbitrum, Optimism o Base para reducir los costos de gas a fracciones de centavo.
+- [ ] Abstracción de Cuentas (ERC-4337 / Paymasters) para habilitar donaciones con tarjetas o moneda local mediante patrocinio de gas (*gasless transactions*).
+_
