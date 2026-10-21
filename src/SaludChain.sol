@@ -293,6 +293,8 @@ contract SaludChain is AccessControl, ReentrancyGuard {
     /// @notice El destinatario retira los fondos de una campaña cumplida.
     /// @dev Pull payment: el contrato nunca envía fondos por su cuenta. Marca la campaña como
     ///      Liberada antes de transferir (checks-effects-interactions) y está protegido contra reentrada.
+solidity
+    ///      Si `destinatario` es un contrato que rechaza ETH, la transferencia revierte y los fondos permanecen en custodia. Ver "Known limitations" en el README.
     /// @param campaniaId Identificador de la campaña.
     function retirar(uint256 campaniaId) external nonReentrant {
         Campania memory c = _campanias[campaniaId];
