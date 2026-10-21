@@ -149,7 +149,7 @@ _(el resto de las limitaciones se completa en equipo)_
 
 _Protección de Datos Personales y Sensibles (Ley 25.326 / GDPR)
   Privacidad por diseño (Privacy by Design): Ningún dato de salud (diagnósticos, presupuestos detallados o datos filiatorios del paciente) se sube a la blockchain ni a servidores del frontend. 
-  Disociación criptográfica: La función `crearCampania` almacena únicamente un `hashDocs` (SHA-256) generado localmente en el navegador del usuario. El documento original permanece en poder del paciente/médico, haciendo técnicamente inviable la reconstrucción o filtración de datos de salud a partir del estado on-chain.
+  Disociación criptográfica: La función `crearCampania` almacena únicamente un `hashDocs` (Keccak-256) generado localmente en el navegador del usuario. El documento original permanece en poder del paciente/médico, haciendo técnicamente inviable la reconstrucción o filtración de datos de salud a partir del estado on-chain.
 Naturaleza Jurídica de los Fondos y Donaciones:
  Las transferencias configuran donaciones sujetas a condición resolutoria expresa (alcanzar la meta dentro del plazo estipulado). El contrato inteligente actúa como una ejecución técnica automatizada de dicha condición (art. 343 y concs. del CCCN).
 * **Validez Probatoria del NFT:**
