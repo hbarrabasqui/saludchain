@@ -61,6 +61,19 @@ slither . --filter-paths "lib|test|script" > docs/slither.txt 2>&1
 
 Los hallazgos y su tratamiento (corregido / falso positivo / aceptado con justificación) están en `docs/slither.md`.
 
+## Seguridad
+
+### Known limitations
+
+**Destinatario que rechaza ETH.** Al liberar los fondos, `SaludChain` envía ETH a la dirección `destinatario` de la campaña. Si esa dirección es un contrato sin función `receive()`/`fallback()` payable, o uno que revierte al recibir ETH, la transferencia falla y la transacción de retiro revierte. Los fondos no se pierden: permanecen custodiados en el contrato, porque el revert deshace todo el cambio de estado. Sin embargo, no pueden liberarse a ese destinatario.
+
+**Solución procedimental (mitigación):**
+1. **Validación previa a la verificación:** antes de ejecutar `verificar()`, el `VERIFICADOR_ROLE` confirma que el `destinatario` puede recibir ETH. Para eso se usa preferentemente una cuenta EOA (wallet) del hospital o del beneficiario, o se realiza una transferencia de prueba de un monto mínimo en Sepolia.
+2. **No se verifican campañas** cuyo destinatario sea un contrato que no garantice la recepción de ETH.
+3. **Ante una falla en la liberación,** los fondos quedan en el contrato y el caso se escala al equipo para su resolución. Las devoluciones a donantes siguen disponibles si la campaña vence.
+
+**Mejora futura:** migrar la liberación al patrón *pull over push* (withdrawal pattern), para que el destinatario retire sus fondos en lugar de recibirlos por envío directo.
+
 ## Despliegue y verificación (Sepolia)
 
 ```bash
