@@ -52,7 +52,8 @@
         case "MontoCero": return "El monto debe ser mayor que cero.";
         case "PlazoVencido": return "La campaña ya superó su plazo.";
         case "NoEsDestinatario": return "Solo el destinatario de la campaña puede retirar los fondos.";
-        case "DevolucionNoDisponible": return "Todavía no hay devolución: la campaña no venció o ya alcanzó su meta.";
+        case "DevolucionNoDisponible": return "Todavía no hay devolución: el plazo no venció, o el destinatario todavía está a tiempo de retirar.";
+        case "VentanaDeRetiroVencida": return "Pasaron los 30 días para retirar: ahora los donantes pueden recuperar su aporte.";
         case "SinAportes": return "No tenés aportes para recuperar en esta campaña.";
         case "MontoAprobadoInvalido": return `El monto aprobado debe ser mayor que cero y no superar la meta solicitada (${eth(a[1])} ETH).`;
         case "AccessControlUnauthorizedAccount": return "Tu cuenta no tiene permiso de verificador.";
@@ -244,7 +245,13 @@
     const nombre = ESTADOS[estado];
     const meta = c.meta, rec = c.recaudado;
     const pct = meta > 0n ? Number((rec * 10000n) / meta) / 100 : 0;
-    const plazoTxt = c.plazo > 0n ? `Plazo: <b>${esc(fecha(c.plazo))}</b>` : `Duración: <b>${Number(c.duracion) / 86400} días</b> desde la verificación`;
+    const guardado = Number(c.estado); // estado guardado en el contrato (Vencida es solo derivado)
+    const hasta = c.plazo > 0n ? esc(fecha(c.plazo)) : "";
+    let plazoTxt;
+    if (guardado === 3) plazoTxt = ""; // ya retirada: el plazo dejó de ser relevante
+    else if (guardado === 2) plazoTxt = `Ventana de retiro hasta: <b>${hasta}</b>`; // Cumplida: ahora `plazo` es el límite para retirar
+    else if (c.plazo > 0n) plazoTxt = `Plazo: <b>${hasta}</b>`;
+    else plazoTxt = `Duración: <b>${Number(c.duracion) / 86400} días</b> desde la verificación`;
     const esDest = cuenta && cuenta.toLowerCase() === c.destinatario.toLowerCase();
     let acciones = "";
     if (estado === 0) {
@@ -263,14 +270,19 @@
     } else if (estado === 2) {
       acciones = esDest
         ? `<button class="btn primary" data-accion="retirar" data-id="${id}">Retirar fondos</button>
-           <span class="nota">¡Meta alcanzada! Sos el destinatario.</span>`
-        : `<span class="nota">Meta alcanzada. Campaña cerrada con éxito; el destinatario puede retirar los fondos.</span>`;
+           <span class="nota">¡Meta alcanzada! Sos el destinatario: retirá antes del ${hasta}.</span>`
+        : `<span class="nota">Meta alcanzada. El destinatario puede retirar hasta el ${hasta}; si no lo hace, los donantes recuperan su aporte.</span>`;
     } else if (estado === 3) {
       acciones = `<span class="nota">Cerrada con éxito: los fondos fueron entregados al destinatario.</span>`;
     } else {
+      const sinRetirar = guardado === 2; // alcanzó la meta pero el destinatario no retiró dentro de la ventana
+      const motivo = sinRetirar
+        ? "La meta se alcanzó pero el destinatario no retiró dentro de los 30 días: cada donante puede recuperar su aporte."
+        : "Venció sin alcanzar la meta: cada donante puede recuperar su aporte.";
       acciones = aporte > 0n
-        ? `<button class="btn primary" data-accion="devolucion" data-id="${id}">Recuperar mi aporte (${eth(aporte)} ETH)</button>`
-        : `<span class="nota">Venció sin alcanzar la meta: cada donante puede recuperar su aporte.</span>`;
+        ? `<button class="btn primary" data-accion="devolucion" data-id="${id}">Recuperar mi aporte (${eth(aporte)} ETH)</button>
+           <span class="nota">${motivo}</span>`
+        : `<span class="nota">${motivo}</span>`;
     }
     return `<article class="card estado-${nombre.toLowerCase()}" data-id="${id}">
       <div class="card-head"><h3>Campaña #${id}</h3><span class="badge ${nombre.toLowerCase()}">${nombre}</span></div>
@@ -278,7 +290,7 @@
       <div class="cifras"><span><b>${eth(rec)}</b> ETH recaudados</span><span>Meta: <b>${eth(meta)}</b> ETH (${pct.toFixed(1)}%)</span></div>
       <div class="meta">
         <span>Destinatario: <b class="mono">${esc(c.destinatario)}</b></span>
-        <span>${plazoTxt}</span>
+        ${plazoTxt ? `<span>${plazoTxt}</span>` : ""}
         <span>Huella de documentación: <b class="mono">${esc(c.hashDocs)}</b></span>
         ${aporte > 0n ? `<span>Mi aporte: <b>${eth(aporte)} ETH</b></span>` : ""}
       </div>

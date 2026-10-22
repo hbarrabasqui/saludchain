@@ -15,16 +15,16 @@ Dos contratos que interactúan entre sí:
 
 **Roles:** beneficiario/creador (crea la campaña), verificador (aprueba y fija el monto máximo), donante.
 
-**Estados de una campaña:** `Pendiente → Activa → Cumplida → Liberada`; o `Vencida` (derivado: plazo vencido sin alcanzar la meta → devolución).
+**Estados de una campaña:** `Pendiente → Activa → Cumplida → Liberada`; o `Vencida` (derivado, no se guarda): el plazo de donación venció sin alcanzar la meta, **o** se alcanzó la meta pero el destinatario no retiró dentro de los 30 días (`PLAZO_RETIRO`). En ambos casos cada donante recupera su aporte.
 
 **Flujo principal:**
 1. `crearCampania(destinatario, meta, duracion, hashDocs)` → queda **Pendiente** (solo se guarda la huella de la documentación, nunca datos médicos).
 2. `verificar(id, montoAprobado)` (solo `VERIFICADOR_ROLE`) → **Activa**; el monto aprobado pasa a ser la meta y arranca el plazo.
 3. `donar(id)` (payable) → suma al recaudado y emite el NFT `Recibo`. No acepta más de lo que falta para la meta; al llegar a ella la campaña pasa a **Cumplida** y se cierra.
-4. `retirar(id)` → el destinatario cobra (pull payment). Pasa a **Liberada**.
-5. Si venció el plazo sin llegar a la meta: `reclamarDevolucion(id)` → cada donante recupera su aporte.
+4. `retirar(id)` → el destinatario cobra (pull payment) dentro de los **30 días** posteriores a alcanzar la meta. Pasa a **Liberada**.
+5. `reclamarDevolucion(id)` → cada donante recupera su aporte si venció el plazo sin llegar a la meta, o si venció la ventana de retiro sin que el destinatario cobrara. `retirar` y `reclamarDevolucion` nunca pueden ejecutarse en el mismo instante: el retiro vale hasta el `plazo` inclusive y la devolución solo después.
 
-Buenas prácticas aplicadas: NatSpec completo, eventos, custom errors, patrón checks-effects-interactions, `ReentrancyGuard`, contabilidad interna (no depende de `address(this).balance`), una lectura y una escritura de storage por variable en cada función.
+Buenas prácticas aplicadas: NatSpec completo (contratos, script y tests), eventos, custom errors, patrón checks-effects-interactions, `ReentrancyGuard`, contabilidad interna (no depende de `address(this).balance`), una lectura y una escritura de storage por variable en cada función, y los fondos nunca quedan bloqueados (ver «Seguridad»).
 
 ### ¿Por qué se dona en ETH y no en una stablecoin?
 
@@ -50,7 +50,49 @@ forge build
 ```bash
 forge test            # todos los tests deben pasar
 forge coverage --report summary
+forge test --gas-report
 ```
+
+**Resultado:** `forge test` muestra **53 tests, todos pasan y 0 fallan**: 51 unitarios y de fuzzing (cada función con un caso de éxito y uno de revert, bordes de tiempo exactos de las ventanas de donación y de retiro), 1 de medición de gas (`MedicionGas`) y 1 suite de invariantes con 2 propiedades. Los invariantes ejecutan secuencias aleatorias de crear, verificar, donar, retirar, devolver y avanzar el tiempo, incluyendo destinatarios que rechazan ETH, y verifican que **el saldo del contrato siempre es igual a la suma de `recaudado` de las campañas no liberadas** y que nunca se recauda más que la meta.
+
+**Cobertura** (`forge coverage --report summary`):
+
+| Archivo | Líneas | Sentencias | Ramas | Funciones |
+|---|---|---|---|---|
+| `src/SaludChain.sol` | 100,00 % (93/93) | 100,00 % (120/120) | 100,00 % (27/27) | 100,00 % (10/10) |
+| `src/Recibo.sol` | 100,00 % (18/18) | 100,00 % (21/21) | 100,00 % (4/4) | 100,00 % (4/4) |
+| `script/Deploy.s.sol` | 0 % (0/10) | 0 % (0/11) | — | 0 % (0/1) |
+| `test/Invariantes.t.sol` (contratos auxiliares) | 100,00 % (48/48) | 100,00 % (55/55) | 100,00 % (7/7) | 100,00 % (9/9) |
+| `test/SaludChain.t.sol` (contratos auxiliares) | 100,00 % (15/15) | 100,00 % (8/8) | 100,00 % (2/2) | 100,00 % (6/6) |
+| **Total** | 94,57 % (174/184) | 94,88 % (204/215) | 100,00 % (40/40) | 96,67 % (29/30) |
+
+Foundry también mide los contratos auxiliares definidos dentro de los tests (atacantes, receptores que rechazan ETH, el manejador de invariantes); por eso aparecen en la tabla y en el total. El código del protocolo (`src/`) está cubierto al 100 %; el 0 % corresponde al script de despliegue, que no es lógica del protocolo y se probó contra una red local (anvil); para Sepolia ver la nota sobre el gas en «Despliegue». El requisito del profe (>40 %) se supera con holgura.
+
+### Optimizaciones de gas (medidas)
+
+Medido con un escenario fijo (`test/MedicionGas.t.sol`: dos campañas, tres donaciones, un retiro y una devolución), que se corre igual sobre el código anterior (commit `875331c`) y sobre el actual. Cada llamada se ejecuta como transacción propia, así que los valores son el gas total de una transacción real (incluye el costo base de 21.000):
+
+```bash
+forge test --isolate --gas-report --match-contract MedicionGas
+```
+
+| Llamada | Antes | Después | Variación |
+|---|---|---|---|
+| `crearCampania` (primera campaña) | 119.652 | 114.326 | −4,5 % |
+| `verificar` | 60.921 | 34.210 | −43,8 % |
+| `donar` (primera donación, emite el primer NFT) | 221.032 | 216.273 | −2,2 % |
+| `donar` (alcanza la meta) | 191.309 | 186.883 | −2,3 % |
+| `retirar` | 46.947 | 40.407 | −13,9 % |
+| `reclamarDevolucion` | 43.932 | 38.619 | −12,1 % |
+| `estadoActual` (llamada como transacción) | 11.555 | 2.972 | −74,3 % |
+| Despliegue (`SaludChain` + `Recibo`) | 2.688.655 | 2.473.484 | −8,0 % |
+| Tamaño del contrato (runtime) | 5.838 bytes | 4.843 bytes | −17,0 % |
+
+Versión de Foundry usada: `forge Version: 1.8.5` (commit `51a52c59cf`, compilación del 2026-10-05). Los valores absolutos de gas pueden variar según la versión de Foundry; lo importante son los porcentajes de mejora.
+
+La mayor baja está en `verificar`: con el struct empaquetado, `plazo` comparte slot con `destinatario` y `estado`, que ya tiene datos, así que escribirlo cuesta mucho menos que estrenar un slot vacío. En `donar` la mejora es chica porque la mayor parte del costo es emitir el NFT.
+
+Qué se hizo: (1) no copiar el struct `Campania` entero a memoria: se lee solo cada campo necesario desde un puntero a `storage`, una vez por variable; (2) el struct quedó empaquetado en un solo slot (`destinatario` 20 + `estado` 1 + `duracion` `uint32` 4 + `plazo` `uint40` 5 = 30 bytes); (3) aritmética en `unchecked` solo donde hay un invariante que la hace segura (`faltante = meta - recaudado`, `recaudado + monto` que no supera la meta, `recaudado -= monto` en la devolución, contador de campañas), cada una documentada en el código; (4) al crear una campaña solo se escriben los campos distintos de cero.
 
 ## Análisis estático (Slither)
 
@@ -65,12 +107,19 @@ Los hallazgos y su tratamiento (corregido / falso positivo / aceptado con justif
 
 ### Known limitations
 
-**Destinatario que rechaza ETH.** `retirar(id)` usa el patrón *pull payment*: el pago al destinatario se ejecuta en una transacción separada y no afecta a otras campañas ni a los donantes. Sin embargo, si `destinatario` es un contrato sin `receive()`/`fallback()` payable, o uno que revierte al recibir ETH, la transferencia falla y `retirar` revierte. Los fondos no se pierden, porque permanecen custodiados en el contrato, pero no pueden liberarse a ese destinatario. Lo mismo aplica a `reclamarDevolucion(id)` si un donante es un contrato que rechaza ETH; en ese caso solo afecta a ese donante.
+**Destinatario que rechaza ETH (resuelto con una ventana de retiro de 30 días).** `retirar(id)` usa el patrón *pull payment*: el pago al destinatario se ejecuta en una transacción separada y no afecta a otras campañas ni a los donantes. Si `destinatario` es un contrato sin `receive()`/`fallback()` payable, o uno que revierte al recibir ETH, la transferencia falla y `retirar` revierte: la campaña queda `Cumplida` con los fondos en custodia. Para que esos fondos **nunca queden bloqueados**, el destinatario tiene `PLAZO_RETIRO` = **30 días** desde que se alcanza la meta. Pasado ese plazo ya no se puede retirar, la campaña pasa a figurar como `Vencida` y **cada donante recupera su aporte** con `reclamarDevolucion(id)`. O cobra el destinatario dentro de los 30 días, o se devuelve a los donantes: nunca hay un estado sin salida. El retiro vale hasta el `plazo` inclusive y la devolución solo después, así que no pueden ejecutarse a la vez.
 
-**Solución procedimental (mitigación):**
+Cómo se comprobó: `test_Devolucion_DestinatarioQueRechazaLosDonantesRecuperanTodo` (destinatario contrato que rechaza → pasa la ventana → cada donante recupera lo suyo y el contrato queda en cero), pruebas de borde exacto del plazo, fuzzing de devoluciones parciales y un invariante que exige que el saldo del contrato sea siempre igual a la suma de lo recaudado por las campañas no liberadas. En Sepolia no se puede demostrar en vivo porque habría que esperar 30 días: se prueba con `vm.warp` en los tests.
+
+Limitaciones que quedan de este diseño:
+- **Un destinatario legítimo que no retira a tiempo pierde el derecho a cobrar**; los donantes recuperan su aporte. Es la contrapartida de que los fondos nunca queden trabados.
+- `reclamarDevolucion(id)` también puede fallar si un donante es un contrato que rechaza ETH; en ese caso solo afecta a ese donante y su aporte queda registrado (`test_Devolucion_RevertSiElDonanteRechazaElReembolso`).
+- No existe función de rescate ni administrador que pueda mover los fondos: es una decisión de diseño para que nadie pueda disponer de ellos.
+
+**Solución procedimental (complementa la ventana de retiro):**
 1. Antes de ejecutar `verificar()`, el `VERIFICADOR_ROLE` confirma que el `destinatario` puede recibir ETH. Para eso se usa preferentemente una wallet EOA del beneficiario o del hospital, o se hace una transferencia de prueba de un monto mínimo en Sepolia.
 2. No se verifican campañas cuyo destinatario sea un contrato que no garantice la recepción de ETH.
-3. Si igualmente falla la liberación, los fondos quedan en custodia y el caso se escala al equipo para su resolución.
+3. Si igualmente falla la liberación, los fondos quedan en custodia hasta que venza la ventana de retiro; después cada donante los recupera con `reclamarDevolucion`. Con estos controles el caso no debería llegar a esa instancia, y si llega, no hay pérdida de fondos.
 
 ## Despliegue y verificación (Sepolia)
 
@@ -110,28 +159,35 @@ Publicación opcional en GitHub Pages: el workflow `.github/workflows/pages.yml`
 
 ## Red y direcciones desplegadas
 
-Red: **Sepolia** (chainId 11155111). Bloque de despliegue: `11937714`. Transacción de despliegue: [`0xeb6b9e77…38251e`](https://sepolia.etherscan.io/tx/0xeb6b9e77c09109764065a2b160254e7ff91d1d8087b7963e930a1f51cb38251e).
+Red: **Sepolia** (chainId 11155111). Despliegue v2 (23/10/2026), bloque `11971361`. Transacción de despliegue: [`0x1bc81cea…3c3687`](https://sepolia.etherscan.io/tx/0x1bc81ceafb269b694a5e26d62c2430df34b3ce62e248666cf12fdd961f3c3687).
 
 | Contrato | Dirección | Código verificado |
 |---|---|---|
-| SaludChain | [`0x8c4D2F8CBe606E03eF5c4Bc39C7543f675F86058`](https://sepolia.etherscan.io/address/0x8c4D2F8CBe606E03eF5c4Bc39C7543f675F86058#code) | Sí (Etherscan) |
-| Recibo | [`0x3Cf2bcF022fe4f07d21460bD04a3593f2AfbAD27`](https://sepolia.etherscan.io/address/0x3Cf2bcF022fe4f07d21460bD04a3593f2AfbAD27#code) | Sí (Etherscan) |
+| SaludChain | [`0x7EA20C63F0B9DD43e715A05eCcef4AB02481b70F`](https://sepolia.etherscan.io/address/0x7EA20C63F0B9DD43e715A05eCcef4AB02481b70F#code) | Sí (Etherscan) |
+| Recibo | [`0x5dFA88D4241B389E54859CB513dcfd4218330502`](https://sepolia.etherscan.io/address/0x5dFA88D4241B389E54859CB513dcfd4218330502#code) | Sí (Etherscan) |
 
-Admin: `0x21E352E3C94190403b389DF072b1aFF049b4F9D4` · Verificador inicial (al desplegar): `0x0B0729677a5793422D070C17aC66B485FaD108c4`. Verificador actual: `0x8e0aDf95F6B26Ed9E32461086d8289c60a7d851a` (ver «Transacciones reales»).
+Admin: `0x21E352E3C94190403b389DF072b1aFF049b4F9D4` (Kipu_1) · Verificador: `0x8e0aDf95F6B26Ed9E32461086d8289c60a7d851a` (Kipu_3). Ambos se fijaron en el constructor al desplegar.
+
+**El código verificado en Etherscan es idéntico al de este repositorio** (se comparó el SHA-256 de `src/SaludChain.sol` y `src/Recibo.sol` con el código fuente que muestra Etherscan; compilador 0.8.28, optimizador activado con 200 corridas, `evm_version = cancun`).
+
+**Despliegue anterior (v1, reemplazado):** SaludChain `0x8c4D2F8CBe606E03eF5c4Bc39C7543f675F86058` y Recibo `0x3Cf2bcF022fe4f07d21460bD04a3593f2AfbAD27` (18/10/2026). No incluía la ventana de retiro de 30 días: si el destinatario era un contrato que rechazaba ETH, los fondos quedaban bloqueados. Se reemplazó por la v2 para cerrar ese problema de seguridad. Las campañas de prueba de la v1 siguen visibles en Etherscan.
 
 ## Transacciones reales del flujo principal
 
-Flujo completo de la campaña #1 en Sepolia (meta 0,01 ETH), con tres cuentas distintas:
+Flujo completo sobre el contrato v2 en Sepolia: una campaña (#1, meta 0,01 ETH, duración de 1 día) creada, verificada, financiada por dos donantes distintos y retirada por su destinatario. Son **exactamente 5 transacciones dirigidas al contrato SaludChain** (`0x7EA20C63…b70F`, desde el bloque 11971361) y **las 5 terminaron con éxito**:
 
-| Paso | Cuenta | Transacción |
-|---|---|---|
-| Crear campaña | Kipu_2 (creador/destinatario) `0x0B07…08c4` | [`0x53127fab…285c80`](https://sepolia.etherscan.io/tx/0x53127fab4d6f38262e105c66499b7206a0071edf56eafc34f0057cab0d285c80) |
-| Verificar (aprobar 0,01 ETH) | Kipu_3 (verificador) `0x8e0a…d851a` | [`0x948984b2…d0211d`](https://sepolia.etherscan.io/tx/0x948984b29107aebaa23317db616f8fb5ce67d5ef2db5175d5c47078432d0211d) |
-| Donar 0,01 ETH (emite NFT Recibo #1) | Kipu_1 (donante/admin) `0x21E3…F9D4` | [`0x78782296…c8d6`](https://sepolia.etherscan.io/tx/0x78782296655600cca593d5e088758e842c87793698e3d27abe68b95f37b7c8d6) |
-| Retirar fondos | Kipu_2 (destinatario) | [`0x9dc7d388…cdcac`](https://sepolia.etherscan.io/tx/0x9dc7d388ad161d6d4cbbe5dff7adc79a33290bd014f76e3f6bb68413c8fcdcac) |
+| Paso | Método | Cuenta que la envió | Hash de la transacción | ETH enviado |
+|---|---|---|---|---|
+| 1 | `crearCampania` | Kipu_2 `0x0B07…08c4` (creador y destinatario) | [`0x99e3e520038f173a186cfec9f85d1843155496b6c4b9ea8f68444dfb6b498d25`](https://sepolia.etherscan.io/tx/0x99e3e520038f173a186cfec9f85d1843155496b6c4b9ea8f68444dfb6b498d25) | — |
+| 2 | `verificar` | Kipu_3 `0x8e0a…851a` (verificador) | [`0x521d86b2cf3699954c2740b2a9c640d6b28654587f3f6ef55802edb8df373f20`](https://sepolia.etherscan.io/tx/0x521d86b2cf3699954c2740b2a9c640d6b28654587f3f6ef55802edb8df373f20) | — (aprueba 0,01 ETH) |
+| 3 | `donar` | Kipu_1 `0x21E3…F9D4` (donante) | [`0x08b9797a79e73f13e601eaf0feec6d932e56b59c7e602b2a2b198c7eaa0478fd`](https://sepolia.etherscan.io/tx/0x08b9797a79e73f13e601eaf0feec6d932e56b59c7e602b2a2b198c7eaa0478fd) | 0,007 ETH (emite el Recibo #1) |
+| 4 | `donar` | Kipu_4, cuarta cuenta `0xF346…59e9` (donante) | [`0x8e5f1a28bde2c1a936a9713e433bc5022852dc0371ad5fe557b59a01c0e0092f`](https://sepolia.etherscan.io/tx/0x8e5f1a28bde2c1a936a9713e433bc5022852dc0371ad5fe557b59a01c0e0092f) | 0,003 ETH (emite el Recibo #2 y cumple la meta) |
+| 5 | `retirar` | Kipu_2 `0x0B07…08c4` (destinatario) | [`0xf7696d9934d3ccd243a48f129513dd22104f49533fda72a9e9d2ccdf9c99bb79`](https://sepolia.etherscan.io/tx/0xf7696d9934d3ccd243a48f129513dd22104f49533fda72a9e9d2ccdf9c99bb79) | — (cobra 0,01 ETH) |
 
-Gestión de roles (el admin le dio el rol de verificador a Kipu_3 y se lo quitó a Kipu_2, que era el verificador inicial del despliegue):
-[`grantRole`](https://sepolia.etherscan.io/tx/0xd04ae3bca4eb50c02269329d929f05b0d5cfaf30ecfcd42a5e3fb3dbc47f87a0) · [`revokeRole`](https://sepolia.etherscan.io/tx/0x8a0afb1f3efa2bcf72ceca88b523083cc7fcb5b6d33058bb782445d34b6af0fe).
+**Estado final comprobado en la cadena:**
+- La campaña #1 quedó **Liberada**: recaudó 0,01 ETH (100 % de la meta) y el saldo del contrato SaludChain es 0 ETH.
+- Se emitieron **2 recibos NFT**, uno por donación: el Recibo #1 a Kipu_1 (0,007 ETH) y el Recibo #2 a Kipu_4 (0,003 ETH). El Recibo #3 no existe.
+- El admin (Kipu_1) y el verificador (Kipu_3) se fijaron en el constructor al desplegar, por lo que no hubo transacciones de gestión de roles. La transacción de despliegue está en «Red y direcciones desplegadas».
 
 ## ¿Por qué blockchain?
 
@@ -153,6 +209,7 @@ _
 - Solo se aceptan donaciones en ETH, sin conversión de moneda local.
 - Esquema "todo o nada": no hay liberación parcial ni por hitos.
 - Una campaña que nunca se verifica queda Pendiente indefinidamente.
+- El destinatario tiene 30 días para retirar una vez cumplida la meta; si no lo hace, los donantes recuperan su aporte (ver «Seguridad → Known limitations»).
 
 _(el resto de las limitaciones se completa en equipo)_
 
@@ -170,7 +227,7 @@ Naturaleza Jurídica de los Fondos y Donaciones:
 
 | Categoría | Riesgo Identificado | Impacto | Mitigación Implementada / Propuesta |
 | :--- | :--- | :--- | :--- |
-| Financiero | Volatilidad de ETH entre el inicio de campaña y el retiro | Alto | Alerta en UI sobre cotización. Planificado: migración a stablecoins (USDC/USDT) con oráculo Chainlink. |
+| Financiero | Volatilidad de ETH entre el inicio de campaña y el retiro | Alto | Planificado: aviso en la interfaz sobre la cotización y migración a stablecoins (USDC/USDT) con oráculo Chainlink (hoy no implementado; ver «¿Por qué se dona en ETH y no en una stablecoin?»). |
 | Seguridad Smart Contracts | Vulnerabilidades de reentrancia o manipulación de balances | Crítico | Uso de `ReentrancyGuard`, patrón *Checks-Effects-Interactions*, contabilidad interna desacoplada de `address(this).balance` y análisis estático con Slither. |
 | Operativo / Fraude | Colusión o falsificación de presupuestos médicos | Alto | Implementación de `hashDocs` para cotejo pericial y rol `VERIFICADOR_ROLE`. En roadmap: firma criptográfica de profesionales matriculados. |
 | Legal / Compliance | Cumplimiento tributario y origen de fondos en montos elevados | Medio | Trazabilidad pública de transacciones en Explorer; la plataforma no custodia claves ni fondos (es meramente una interfaz no permisionada). |
@@ -178,6 +235,10 @@ Naturaleza Jurídica de los Fondos y Donaciones:
 _
 
 ## Roadmap
+
+[Roadmap de evolución completo (PDF, Pablo Lafargue)](Roadmap%20de%20Salud%20Chain%20Evolution.pdf)
+
+Visión a largo plazo. El MVP implementado corresponde a la Fase 1: el retiro y las devoluciones se hacen por reclamo del destinatario o del donante (no son automáticos) y el contrato ya emite los eventos de auditoría.
 
 _Fase 1: MVP Core (Completado)
 - [x] Arquitectura de contratos base (`SaludChain.sol` y `Recibo.sol` ERC-721).

@@ -47,6 +47,8 @@ contract Recibo is ERC721 {
     /// @param reciboId Identificador consultado.
     error ReciboInexistente(uint256 reciboId);
 
+    /// @notice Despliega el contrato de recibos y fija quién puede emitirlos.
+    /// @dev El nombre del NFT es "Recibo SaludChain" y su símbolo es "RSC".
     /// @param saludChain Dirección del contrato SaludChain autorizado a emitir recibos.
     constructor(address saludChain) ERC721("Recibo SaludChain", "RSC") {
         if (saludChain == address(0)) revert DireccionInvalida();
@@ -74,16 +76,16 @@ contract Recibo is ERC721 {
 
     /// @notice Devuelve los datos de un recibo.
     /// @param reciboId Identificador del recibo.
-    /// @return Datos del recibo (campaña, monto y fecha).
-    function datosDe(uint256 reciboId) external view returns (Datos memory) {
+    /// @return datos Datos del recibo (campaña, monto y fecha).
+    function datosDe(uint256 reciboId) external view returns (Datos memory datos) {
         if (_ownerOf(reciboId) == address(0)) revert ReciboInexistente(reciboId);
-        return _datos[reciboId];
+        datos = _datos[reciboId];
     }
 
     /// @notice Metadatos del recibo codificados on-chain (JSON en base64).
     /// @param reciboId Identificador del recibo.
-    /// @return URI de datos con nombre, descripción y atributos del recibo.
-    function tokenURI(uint256 reciboId) public view override returns (string memory) {
+    /// @return uri URI de datos con nombre, descripción y atributos del recibo.
+    function tokenURI(uint256 reciboId) public view override returns (string memory uri) {
         if (_ownerOf(reciboId) == address(0)) revert ReciboInexistente(reciboId);
         Datos memory d = _datos[reciboId];
 
@@ -99,6 +101,6 @@ contract Recibo is ERC721 {
             Strings.toString(d.fecha),
             "}]}"
         );
-        return string.concat("data:application/json;base64,", Base64.encode(bytes(json)));
+        uri = string.concat("data:application/json;base64,", Base64.encode(bytes(json)));
     }
 }
