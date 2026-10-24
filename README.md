@@ -115,6 +115,7 @@ Limitaciones que quedan de este diseño:
 - **Un destinatario legítimo que no retira a tiempo pierde el derecho a cobrar**; los donantes recuperan su aporte. Es la contrapartida de que los fondos nunca queden trabados.
 - `reclamarDevolucion(id)` también puede fallar si un donante es un contrato que rechaza ETH; en ese caso solo afecta a ese donante y su aporte queda registrado (`test_Devolucion_RevertSiElDonanteRechazaElReembolso`).
 - No existe función de rescate ni administrador que pueda mover los fondos: es una decisión de diseño para que nadie pueda disponer de ellos.
+- **El recibo NFT no se anula cuando su donación se devuelve.** Es un registro histórico de la donación; el estado real de los aportes está en el contrato (`aporteDe`). Por ejemplo, el Recibo #3 sigue existiendo aunque Kipu_1 recuperó esos 0,01 ETH en la campaña #2.
 
 **Solución procedimental (complementa la ventana de retiro):**
 1. Antes de ejecutar `verificar()`, el `VERIFICADOR_ROLE` confirma que el `destinatario` puede recibir ETH. Para eso se usa preferentemente una wallet EOA del beneficiario o del hospital, o se hace una transferencia de prueba de un monto mínimo en Sepolia.
@@ -174,7 +175,9 @@ Admin: `0x21E352E3C94190403b389DF072b1aFF049b4F9D4` (Kipu_1) · Verificador: `0x
 
 ## Transacciones reales del flujo principal
 
-Flujo completo sobre el contrato v2 en Sepolia: una campaña (#1, meta 0,01 ETH, duración de 1 día) creada, verificada, financiada por dos donantes distintos y retirada por su destinatario. Son **exactamente 5 transacciones dirigidas al contrato SaludChain** (`0x7EA20C63…b70F`, desde el bloque 11971361) y **las 5 terminaron con éxito**:
+### Flujo 1: campaña cumplida, dos donantes y retiro
+
+Flujo completo sobre el contrato v2 en Sepolia: una campaña (#1, meta 0,01 ETH, duración de 1 día) creada, verificada, financiada por dos donantes distintos y retirada por su destinatario. Son **exactamente 5 transacciones dirigidas al contrato SaludChain** (`0x7EA20C63…b70F`, bloques 11971865 a 11971876) y **las 5 terminaron con éxito**:
 
 | Paso | Método | Cuenta que la envió | Hash de la transacción | ETH enviado |
 |---|---|---|---|---|
@@ -184,10 +187,43 @@ Flujo completo sobre el contrato v2 en Sepolia: una campaña (#1, meta 0,01 ETH,
 | 4 | `donar` | Kipu_4, cuarta cuenta `0xF346…59e9` (donante) | [`0x8e5f1a28bde2c1a936a9713e433bc5022852dc0371ad5fe557b59a01c0e0092f`](https://sepolia.etherscan.io/tx/0x8e5f1a28bde2c1a936a9713e433bc5022852dc0371ad5fe557b59a01c0e0092f) | 0,003 ETH (emite el Recibo #2 y cumple la meta) |
 | 5 | `retirar` | Kipu_2 `0x0B07…08c4` (destinatario) | [`0xf7696d9934d3ccd243a48f129513dd22104f49533fda72a9e9d2ccdf9c99bb79`](https://sepolia.etherscan.io/tx/0xf7696d9934d3ccd243a48f129513dd22104f49533fda72a9e9d2ccdf9c99bb79) | — (cobra 0,01 ETH) |
 
-**Estado final comprobado en la cadena:**
-- La campaña #1 quedó **Liberada**: recaudó 0,01 ETH (100 % de la meta) y el saldo del contrato SaludChain es 0 ETH.
-- Se emitieron **2 recibos NFT**, uno por donación: el Recibo #1 a Kipu_1 (0,007 ETH) y el Recibo #2 a Kipu_4 (0,003 ETH). El Recibo #3 no existe.
+**Estado final comprobado en la cadena al momento de ejecutarse el flujo:**
+- La campaña #1 quedó **Liberada**: recaudó 0,01 ETH (100 % de la meta) y, al momento de ejecutarse, el saldo del contrato SaludChain era 0 ETH.
+- Al momento de ejecutarse se habían emitido **2 recibos NFT**, uno por donación: el Recibo #1 a Kipu_1 (0,007 ETH) y el Recibo #2 a Kipu_4 (0,003 ETH). El Recibo #3 todavía no existía (los flujos siguientes emitieron los demás).
 - El admin (Kipu_1) y el verificador (Kipu_3) se fijaron en el constructor al desplegar, por lo que no hubo transacciones de gestión de roles. La transacción de despliegue está en «Red y direcciones desplegadas».
+
+### Flujo 2: campaña vencida y devolución
+
+Campaña #2 (duración de 1 día, meta de 0,02 ETH): se creó, se verificó, recibió **una única donación de 0,01 ETH** (50 % de la meta) y, **vencido el plazo sin alcanzarla**, el donante recuperó su aporte con `reclamarDevolucion`. Son **4 transacciones y las 4 terminaron con éxito**:
+
+| Paso | Método | Cuenta que la envió | Hash de la transacción | ETH |
+|---|---|---|---|---|
+| 1 | `crearCampania` | Kipu_2 `0x0B07…08c4` (creador y destinatario) | [`0x5f7f6d4e69f757dd3e6c7b2974114ceaf8f3b0f5e6bda8176b0888299890e906`](https://sepolia.etherscan.io/tx/0x5f7f6d4e69f757dd3e6c7b2974114ceaf8f3b0f5e6bda8176b0888299890e906) | — |
+| 2 | `verificar` | Kipu_3 `0x8e0a…851a` (verificador) | [`0xcb8786676fa1245c8ec71763ebd9588662a5b0653ce441a070033566d985ed8d`](https://sepolia.etherscan.io/tx/0xcb8786676fa1245c8ec71763ebd9588662a5b0653ce441a070033566d985ed8d) | — (aprueba 0,02 ETH) |
+| 3 | `donar` | Kipu_1 `0x21E3…F9D4` (donante) | [`0x53e62d5fd86555a6ec59a3199176d797c13bb838a747031253bf01333004c306`](https://sepolia.etherscan.io/tx/0x53e62d5fd86555a6ec59a3199176d797c13bb838a747031253bf01333004c306) | 0,01 ETH (emite el Recibo #3) |
+| 4 | `reclamarDevolucion` | Kipu_1 `0x21E3…F9D4` (donante) | [`0xbb3af957b3082d876f3738084d5f5d8f719873b44dbf40967bc31e91c67c8a8b`](https://sepolia.etherscan.io/tx/0xbb3af957b3082d876f3738084d5f5d8f719873b44dbf40967bc31e91c67c8a8b) | — (recupera sus 0,01 ETH) |
+
+**Estado comprobado en la cadena (consulta del 24/10/2026):**
+- La campaña #2 figura como **Vencida** (en el contrato su estado guardado sigue siendo «Activa»: `Vencida` es un estado derivado del plazo). Recaudado: 0 ETH. El aporte vigente de Kipu_1 es 0 ETH: **le fue devuelto**.
+- El **Recibo #3 sigue existiendo** aunque la donación se devolvió (ver «Known limitations»).
+
+### Pruebas adicionales
+
+Dos campañas más, de 30 días de duración y meta de 0,01 ETH, que se crearon, verificaron, financiaron y cuyos fondos retiró el destinatario (Kipu_2). La #3 tuvo un donante y la #4 dos. Son **9 transacciones, todas exitosas**; ambas campañas quedaron **Liberadas**:
+
+| Campaña | Método | Cuenta | Transacción | ETH |
+|---|---|---|---|---|
+| #3 | `crearCampania` | Kipu_2 | [`0x87235fcc…bddd`](https://sepolia.etherscan.io/tx/0x87235fcc6d0868ec2796dcfdf8a7710700a7a9fdc6eb0c0f3ad6be020251bddd) | — |
+| #3 | `verificar` | Kipu_3 | [`0x5993c73d…2f34`](https://sepolia.etherscan.io/tx/0x5993c73dbf469f0029eefa08294ef6b1eaf58ae541297b0dbecf460fb8552f34) | — |
+| #3 | `donar` | Kipu_1 | [`0xafbfdb8f…c000`](https://sepolia.etherscan.io/tx/0xafbfdb8febb51f54a0336ac95086c444a0cf6b3666b97d3a764f8c718f13c000) | 0,01 (Recibo #4; cumple la meta) |
+| #3 | `retirar` | Kipu_2 | [`0x82386bac…435a`](https://sepolia.etherscan.io/tx/0x82386bac9e3caf64d6f9bd1c23aca50b058c86663d5cabeaff34d6e47cb0435a) | — (cobra 0,01) |
+| #4 | `crearCampania` | Kipu_2 | [`0x4c326c1d…9f11`](https://sepolia.etherscan.io/tx/0x4c326c1d06a18773f54a8fd5f0a4c880062b7cd5ecbb97a32533bbe0c2049f11) | — |
+| #4 | `verificar` | Kipu_3 | [`0x6bc670f2…3c22`](https://sepolia.etherscan.io/tx/0x6bc670f22b6db56366e5f732e9c46ffbb3e536c1276a5f6f9dca67b286873c22) | — |
+| #4 | `donar` | Kipu_1 | [`0x681a637e…b9bc`](https://sepolia.etherscan.io/tx/0x681a637e67cfb6a0a0e96eb40e392e9599d18054a85ad124a44ca2129b11b9bc) | 0,002 (Recibo #5) |
+| #4 | `donar` | Kipu_4 | [`0xf320ec2a…fb7b`](https://sepolia.etherscan.io/tx/0xf320ec2acff1b46626ce5a3ef9ea57ad474c469a964bea4b0146a8f8aaa4fb7b) | 0,008 (Recibo #6; cumple la meta) |
+| #4 | `retirar` | Kipu_2 | [`0x5343bd53…eb4c`](https://sepolia.etherscan.io/tx/0x5343bd5364c7dea7dcd37a353b5eb5c160ccda81a9894877a04ab3831b22eb4c) | — (cobra 0,01) |
+
+**Reconciliación con Etherscan (24/10/2026):** en total hay **18 transacciones dirigidas al contrato SaludChain** (5 del Flujo 1 + 4 del Flujo 2 + 9 de las pruebas adicionales), **todas con estado OK**, más la transacción de despliegue. No hay ninguna transacción fallida o revertida en la cadena para este contrato; los casos de revert (donar más de lo que falta para la meta, retirar dos veces, retirar sin ser el destinatario, etc.) están cubiertos por los tests de Foundry. El saldo del contrato es 0 ETH y existen 6 recibos NFT en total.
 
 ## ¿Por qué blockchain?
 
@@ -233,6 +269,17 @@ Naturaleza Jurídica de los Fondos y Donaciones:
 | Legal / Compliance | Cumplimiento tributario y origen de fondos en montos elevados | Medio | Trazabilidad pública de transacciones en Explorer; la plataforma no custodia claves ni fondos (es meramente una interfaz no permisionada). |
 
 _
+
+## Documentación del proyecto
+
+- [White Paper (PDF, Pablo Lafargue)](Salud%20Chain%20White%20Paper.pdf): resumen no técnico del proyecto, pensado para un lector sin formación en blockchain.
+- [Roadmap de evolución (PDF, Pablo Lafargue)](Roadmap%20de%20Salud%20Chain%20Evolution.pdf): plan de evolución detallado.
+
+**Cómo leer el White Paper junto con este README.** El White Paper es una versión simplificada. Para el comportamiento exacto del contrato v2, este README es la referencia:
+- Cuando el White Paper dice que las reglas «se ejecutan automáticamente», se refiere a que están fijadas en el contrato y nadie puede cambiarlas. Los pagos no son automáticos: el destinatario **retira** y cada donante **reclama** su devolución (*pull payment*).
+- Además del caso de meta no alcanzada, los donantes también recuperan su aporte si el destinatario no retira dentro de los **30 días** posteriores a cumplirse la meta. Por eso el dinero nunca queda atrapado.
+- El recibo NFT es un registro histórico de la donación y **no se anula** si el donante recupera su aporte (ver «Known limitations»).
+- Las «Fases 2 a 4» del White Paper son un resumen agrupado de la visión a futuro. El detalle completo y su numeración están en el Roadmap.
 
 ## Roadmap
 
