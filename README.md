@@ -4,6 +4,12 @@ Plataforma de **donaciones para gastos médicos** sobre Ethereum con custodia en
 
 > Trabajo Final del curso EthKipu 2026 – Ethereum Avanzado (Nivel 2). Red de despliegue: **Sepolia (testnet)**.
 
+## Equipo
+
+- Horacio Barrabasqui (GitHub: [hbarrabasqui](https://github.com/hbarrabasqui))
+- Joana Del Fabro (GitHub: [joanadelfabro-create](https://github.com/joanadelfabro-create))
+- Pablo Lafargue (GitHub: [lafarguep](https://github.com/lafarguep))
+
 ## ¿Qué hace y cómo está armado?
 
 Dos contratos que interactúan entre sí:
